@@ -1,0 +1,15 @@
+{
+  "sources": [
+    {
+      "source_id": "eci-party-affidavits",
+      "name": "Election Commission candidate affidavit endpoint",
+      "source_system": "ECI",
+      "url": "https://httpbin.org/json",
+      "jurisdiction": "IN",
+      "document_type": "json_api",
+      "access_method": "official_api",
+      "license_note": "Public endpoint used for sample ingestion only"
+    }
+  ]
+}
+
