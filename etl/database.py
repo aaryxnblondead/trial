@@ -135,6 +135,61 @@ def initialize_catalog(connection: sqlite3.Connection) -> None:
             created_at_utc TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS entity_match_candidate (
+            entity_match_candidate_id TEXT PRIMARY KEY,
+            left_entity_type TEXT NOT NULL,
+            left_entity_id TEXT,
+            left_entity_name TEXT NOT NULL,
+            right_entity_type TEXT NOT NULL,
+            right_entity_id TEXT,
+            right_entity_name TEXT NOT NULL,
+            match_type TEXT NOT NULL,
+            confidence_score REAL NOT NULL,
+            match_reason TEXT NOT NULL,
+            review_status TEXT NOT NULL,
+            source_document_id TEXT,
+            citation_locator TEXT,
+            created_at_utc TEXT NOT NULL,
+            reviewed_at_utc TEXT,
+            reviewed_by TEXT,
+            review_notes TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS entity_resolution_review_queue (
+            review_queue_id TEXT PRIMARY KEY,
+            entity_match_candidate_id TEXT NOT NULL,
+            left_entity_type TEXT NOT NULL,
+            left_entity_name TEXT NOT NULL,
+            right_entity_type TEXT NOT NULL,
+            right_entity_name TEXT NOT NULL,
+            confidence_score REAL NOT NULL,
+            match_reason TEXT NOT NULL,
+            review_priority TEXT NOT NULL,
+            source_document_id TEXT,
+            citation_locator TEXT,
+            created_at_utc TEXT NOT NULL,
+            resolved_at_utc TEXT,
+            resolved_by TEXT,
+            resolution TEXT,
+            resolution_notes TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS resolved_entity_link (
+            resolved_entity_link_id TEXT PRIMARY KEY,
+            left_entity_type TEXT NOT NULL,
+            left_entity_id TEXT,
+            left_entity_name TEXT NOT NULL,
+            right_entity_type TEXT NOT NULL,
+            right_entity_id TEXT,
+            right_entity_name TEXT NOT NULL,
+            match_type TEXT NOT NULL,
+            confidence_score REAL NOT NULL,
+            resolution_source TEXT NOT NULL,
+            source_document_id TEXT,
+            citation_locator TEXT,
+            created_at_utc TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS ingestion_manifest (
             ingestion_manifest_id TEXT PRIMARY KEY,
             source_document_id TEXT NOT NULL,
@@ -303,3 +358,97 @@ def insert_manifest_entry(connection: sqlite3.Connection, row: Mapping[str, Any]
             utc_now_iso(),
         ),
     )
+
+
+def insert_entity_match_candidate(connection: sqlite3.Connection, row: Mapping[str, Any]) -> str:
+    match_candidate_id = str(uuid4())
+    connection.execute(
+        """
+        INSERT INTO entity_match_candidate (
+            entity_match_candidate_id, left_entity_type, left_entity_id, left_entity_name, right_entity_type,
+            right_entity_id, right_entity_name, match_type, confidence_score, match_reason, review_status,
+            source_document_id, citation_locator, created_at_utc, reviewed_at_utc, reviewed_by, review_notes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            match_candidate_id,
+            row["left_entity_type"],
+            row.get("left_entity_id"),
+            row["left_entity_name"],
+            row["right_entity_type"],
+            row.get("right_entity_id"),
+            row["right_entity_name"],
+            row["match_type"],
+            row["confidence_score"],
+            row["match_reason"],
+            row["review_status"],
+            row.get("source_document_id"),
+            row.get("citation_locator"),
+            utc_now_iso(),
+            row.get("reviewed_at_utc"),
+            row.get("reviewed_by"),
+            row.get("review_notes"),
+        ),
+    )
+    return match_candidate_id
+
+
+def insert_resolution_review_queue(connection: sqlite3.Connection, row: Mapping[str, Any]) -> str:
+    review_queue_id = str(uuid4())
+    connection.execute(
+        """
+        INSERT INTO entity_resolution_review_queue (
+            review_queue_id, entity_match_candidate_id, left_entity_type, left_entity_name, right_entity_type,
+            right_entity_name, confidence_score, match_reason, review_priority, source_document_id,
+            citation_locator, created_at_utc, resolved_at_utc, resolved_by, resolution, resolution_notes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            review_queue_id,
+            row["entity_match_candidate_id"],
+            row["left_entity_type"],
+            row["left_entity_name"],
+            row["right_entity_type"],
+            row["right_entity_name"],
+            row["confidence_score"],
+            row["match_reason"],
+            row["review_priority"],
+            row.get("source_document_id"),
+            row.get("citation_locator"),
+            utc_now_iso(),
+            row.get("resolved_at_utc"),
+            row.get("resolved_by"),
+            row.get("resolution"),
+            row.get("resolution_notes"),
+        ),
+    )
+    return review_queue_id
+
+
+def insert_resolved_entity_link(connection: sqlite3.Connection, row: Mapping[str, Any]) -> str:
+    resolved_link_id = str(uuid4())
+    connection.execute(
+        """
+        INSERT INTO resolved_entity_link (
+            resolved_entity_link_id, left_entity_type, left_entity_id, left_entity_name, right_entity_type,
+            right_entity_id, right_entity_name, match_type, confidence_score, resolution_source,
+            source_document_id, citation_locator, created_at_utc
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            resolved_link_id,
+            row["left_entity_type"],
+            row.get("left_entity_id"),
+            row["left_entity_name"],
+            row["right_entity_type"],
+            row.get("right_entity_id"),
+            row["right_entity_name"],
+            row["match_type"],
+            row["confidence_score"],
+            row["resolution_source"],
+            row.get("source_document_id"),
+            row.get("citation_locator"),
+            utc_now_iso(),
+        ),
+    )
+    return resolved_link_id

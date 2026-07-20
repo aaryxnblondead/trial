@@ -4,8 +4,18 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List
 
-from etl.database import initialize_catalog, insert_classified_rows, insert_manifest_entry, insert_source_document, open_catalog
+from etl.database import (
+    initialize_catalog,
+    insert_classified_rows,
+    insert_entity_match_candidate,
+    insert_manifest_entry,
+    insert_resolution_review_queue,
+    insert_resolved_entity_link,
+    insert_source_document,
+    open_catalog,
+)
 from etl.models import SourceDefinition
+from etl.matching import classify_match, generate_documentable_candidates, review_priority
 from etl.normalization import classify_records, extract_records, parse_payload
 from etl.sources import fetch_source_payload, validate_source_definition
 from etl.storage import append_jsonl, write_artifact
@@ -76,6 +86,55 @@ def run_ingestion(config_path: Path, data_root: Path) -> List[Dict[str, Any]]:
             classified = classify_records(records, source_document_id=source_document_id, citation_locator=source.citation_locator or source.source_id)
             inserted_counts = insert_classified_rows(connection, source_document_id=source_document_id, classified=classified)
 
+            person_rows = connection.execute("SELECT person_id, canonical_name, normalized_name, person_role, source_document_id, citation_locator FROM person").fetchall()
+            institution_rows = connection.execute("SELECT institution_id, canonical_name, normalized_name, source_document_id, citation_locator FROM institution").fetchall()
+            candidates = generate_documentable_candidates(person_rows, institution_rows)
+            approved_matches = 0
+            review_matches = 0
+            for candidate in candidates:
+                review_status = classify_match(candidate)
+                candidate_row = {
+                    "left_entity_type": candidate.left_entity_type,
+                    "left_entity_id": candidate.left_entity_id,
+                    "left_entity_name": candidate.left_entity_name,
+                    "right_entity_type": candidate.right_entity_type,
+                    "right_entity_id": candidate.right_entity_id,
+                    "right_entity_name": candidate.right_entity_name,
+                    "match_type": candidate.match_type,
+                    "confidence_score": candidate.confidence_score,
+                    "match_reason": candidate.match_reason,
+                    "review_status": review_status,
+                    "source_document_id": candidate.source_document_id,
+                    "citation_locator": candidate.citation_locator,
+                }
+                candidate_id = insert_entity_match_candidate(connection, candidate_row)
+                if review_status == "approved":
+                    insert_resolved_entity_link(
+                        connection,
+                        {
+                            **candidate_row,
+                            "resolution_source": "auto_approved",
+                        },
+                    )
+                    approved_matches += 1
+                else:
+                    insert_resolution_review_queue(
+                        connection,
+                        {
+                            "entity_match_candidate_id": candidate_id,
+                            "left_entity_type": candidate.left_entity_type,
+                            "left_entity_name": candidate.left_entity_name,
+                            "right_entity_type": candidate.right_entity_type,
+                            "right_entity_name": candidate.right_entity_name,
+                            "confidence_score": candidate.confidence_score,
+                            "match_reason": candidate.match_reason,
+                            "review_priority": review_priority(candidate.confidence_score),
+                            "source_document_id": candidate.source_document_id,
+                            "citation_locator": candidate.citation_locator,
+                        },
+                    )
+                    review_matches += 1
+
             connection.commit()
 
             row = {
@@ -87,6 +146,9 @@ def run_ingestion(config_path: Path, data_root: Path) -> List[Dict[str, Any]]:
                 "inserted_metrics": inserted_counts["quality_metric"],
                 "inserted_controls": inserted_counts["control_variable"],
                 "inserted_assertions": inserted_counts["assertion_fact"],
+                "inserted_candidate_matches": approved_matches + review_matches,
+                "inserted_review_queue_items": review_matches,
+                "inserted_resolved_links": approved_matches,
             }
             append_jsonl(manifest_path, row)
             insert_manifest_entry(connection, row)
