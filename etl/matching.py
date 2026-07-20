@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+from collections import defaultdict
 from typing import Any, Iterable, Mapping
-from uuid import uuid4
 
 
 AUTO_APPROVE_THRESHOLD = 0.95
@@ -33,14 +33,54 @@ def canonical_key(value: str) -> str:
     return " ".join(value.casefold().split())
 
 
+def blocking_keys(value: str) -> set[str]:
+    tokens = [token for token in canonical_key(value).split() if token]
+    if not tokens:
+        return set()
+    if len(tokens) == 1:
+        token = tokens[0]
+        return {token[:6]}
+    first_token = tokens[0][:2]
+    last_token = tokens[-1][:4]
+    head_pair = f"{first_token}:{last_token}"
+    compact = "".join(token[:2] for token in tokens[:3])
+    return {head_pair, compact}
+
+
+def _index_institutions(institution_rows: Iterable[Mapping[str, Any]]) -> dict[str, list[Mapping[str, Any]]]:
+    index: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
+    for institution in institution_rows:
+        institution_name = str(institution["canonical_name"]).strip()
+        if not institution_name:
+            continue
+        keys = blocking_keys(institution_name)
+        if not keys:
+            continue
+        for key in keys:
+            index[key].append(institution)
+    return index
+
+
 def build_person_institution_candidates(person_rows: Iterable[Mapping[str, Any]], institution_rows: Iterable[Mapping[str, Any]]) -> list[MatchCandidate]:
     candidates: list[MatchCandidate] = []
+    institution_index = _index_institutions(institution_rows)
     for person in person_rows:
         person_name = str(person["canonical_name"]).strip()
         person_key = canonical_key(person_name)
         if not person_key:
             continue
-        for institution in institution_rows:
+
+        candidate_institutions: list[Mapping[str, Any]] = []
+        seen_institution_ids: set[str] = set()
+        for key in blocking_keys(person_name):
+            for institution in institution_index.get(key, []):
+                institution_id = str(institution.get("institution_id") or institution.get("canonical_name"))
+                if institution_id in seen_institution_ids:
+                    continue
+                seen_institution_ids.add(institution_id)
+                candidate_institutions.append(institution)
+
+        for institution in candidate_institutions:
             institution_name = str(institution["canonical_name"]).strip()
             institution_key = canonical_key(institution_name)
             if not institution_key:
