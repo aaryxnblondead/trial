@@ -118,6 +118,45 @@ def initialize_catalog(connection: sqlite3.Connection) -> None:
             created_at_utc TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS exposure_measure (
+            exposure_measure_id TEXT PRIMARY KEY,
+            jurisdiction_id TEXT,
+            metric_year INTEGER NOT NULL,
+            exposure_name TEXT NOT NULL,
+            exposure_value REAL NOT NULL,
+            unit TEXT,
+            source_document_id TEXT NOT NULL,
+            citation_locator TEXT NOT NULL,
+            evidence_status TEXT NOT NULL,
+            created_at_utc TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS analysis_run (
+            analysis_run_id TEXT PRIMARY KEY,
+            analysis_name TEXT NOT NULL,
+            model_name TEXT NOT NULL,
+            data_snapshot_hash TEXT NOT NULL,
+            specification_hash TEXT NOT NULL,
+            code_version_hash TEXT NOT NULL,
+            outcome_definition TEXT NOT NULL,
+            exposure_definition TEXT NOT NULL,
+            controls_definition TEXT NOT NULL,
+            created_at_utc TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS regression_result (
+            regression_result_id TEXT PRIMARY KEY,
+            analysis_run_id TEXT NOT NULL,
+            coefficient_name TEXT NOT NULL,
+            estimate REAL NOT NULL,
+            std_error REAL NOT NULL,
+            ci_lower REAL NOT NULL,
+            ci_upper REAL NOT NULL,
+            p_value REAL,
+            n_obs INTEGER NOT NULL,
+            created_at_utc TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS assertion_fact (
             assertion_fact_id TEXT PRIMARY KEY,
             subject_entity_type TEXT NOT NULL,
@@ -358,6 +397,81 @@ def insert_manifest_entry(connection: sqlite3.Connection, row: Mapping[str, Any]
             utc_now_iso(),
         ),
     )
+
+
+def insert_exposure_measure(connection: sqlite3.Connection, row: Mapping[str, Any]) -> str:
+    exposure_measure_id = str(uuid4())
+    connection.execute(
+        """
+        INSERT INTO exposure_measure (
+            exposure_measure_id, jurisdiction_id, metric_year, exposure_name, exposure_value, unit,
+            source_document_id, citation_locator, evidence_status, created_at_utc
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            exposure_measure_id,
+            row.get("jurisdiction_id"),
+            row["metric_year"],
+            row["exposure_name"],
+            row["exposure_value"],
+            row.get("unit"),
+            row["source_document_id"],
+            row["citation_locator"],
+            row["evidence_status"],
+            utc_now_iso(),
+        ),
+    )
+    return exposure_measure_id
+
+
+def insert_analysis_run(connection: sqlite3.Connection, row: Mapping[str, Any]) -> str:
+    analysis_run_id = str(uuid4())
+    connection.execute(
+        """
+        INSERT INTO analysis_run (
+            analysis_run_id, analysis_name, model_name, data_snapshot_hash, specification_hash,
+            code_version_hash, outcome_definition, exposure_definition, controls_definition, created_at_utc
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            analysis_run_id,
+            row["analysis_name"],
+            row["model_name"],
+            row["data_snapshot_hash"],
+            row["specification_hash"],
+            row["code_version_hash"],
+            row["outcome_definition"],
+            row["exposure_definition"],
+            row["controls_definition"],
+            utc_now_iso(),
+        ),
+    )
+    return analysis_run_id
+
+
+def insert_regression_result(connection: sqlite3.Connection, row: Mapping[str, Any]) -> str:
+    regression_result_id = str(uuid4())
+    connection.execute(
+        """
+        INSERT INTO regression_result (
+            regression_result_id, analysis_run_id, coefficient_name, estimate, std_error, ci_lower,
+            ci_upper, p_value, n_obs, created_at_utc
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            regression_result_id,
+            row["analysis_run_id"],
+            row["coefficient_name"],
+            row["estimate"],
+            row["std_error"],
+            row["ci_lower"],
+            row["ci_upper"],
+            row.get("p_value"),
+            row["n_obs"],
+            utc_now_iso(),
+        ),
+    )
+    return regression_result_id
 
 
 def insert_entity_match_candidate(connection: sqlite3.Connection, row: Mapping[str, Any]) -> str:
